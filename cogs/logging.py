@@ -18,23 +18,15 @@ class Logging(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
         await self.bot.db.ensure_user(member.id, str(member))
-        embed = discord.Embed(
-            title="📥 Üye Katıldı",
-            description=f"{member.mention} sunucuya katıldı.",
-            color=discord.Color.green()
-        )
+        embed = discord.Embed(title="📥 Member Joined", description=f"{member.mention} joined the server.", color=discord.Color.green())
         embed.set_thumbnail(url=member.display_avatar.url)
-        embed.add_field(name="Hesap Oluşturma", value=discord.utils.format_dt(member.created_at, "R"))
+        embed.add_field(name="Account Created", value=discord.utils.format_dt(member.created_at, "R"))
         embed.set_footer(text=f"ID: {member.id}")
         await self.send_log(member.guild, embed)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
-        embed = discord.Embed(
-            title="📤 Üye Ayrıldı",
-            description=f"{member} sunucudan ayrıldı.",
-            color=discord.Color.red()
-        )
+        embed = discord.Embed(title="📤 Member Left", description=f"{member} left the server.", color=discord.Color.red())
         embed.set_footer(text=f"ID: {member.id}")
         await self.send_log(member.guild, embed)
 
@@ -43,11 +35,11 @@ class Logging(commands.Cog):
         if message.author.bot or not message.guild:
             return
         embed = discord.Embed(
-            title="🗑️ Mesaj Silindi",
-            description=f"**Kanal:** {message.channel.mention}\n**Kullanıcı:** {message.author.mention}\n**İçerik:** {message.content[:500] or '*[Görüntülenemiyor]*'}",
+            title="🗑️ Message Deleted",
+            description=f"**Channel:** {message.channel.mention}\n**User:** {message.author.mention}\n**Content:** {message.content[:500] or '*[Could not display]*'}",
             color=discord.Color.dark_red()
         )
-        embed.set_footer(text=f"Mesaj ID: {message.id}")
+        embed.set_footer(text=f"Message ID: {message.id}")
         await self.send_log(message.guild, embed)
 
     @commands.Cog.listener()
@@ -55,13 +47,13 @@ class Logging(commands.Cog):
         if before.author.bot or not before.guild or before.content == after.content:
             return
         embed = discord.Embed(
-            title="✏️ Mesaj Düzenlendi",
-            description=f"**Kanal:** {before.channel.mention}\n**Kullanıcı:** {before.author.mention}",
+            title="✏️ Message Edited",
+            description=f"**Channel:** {before.channel.mention}\n**User:** {before.author.mention}",
             color=discord.Color.blue()
         )
-        embed.add_field(name="Öncesi", value=before.content[:400] or "*boş*", inline=False)
-        embed.add_field(name="Sonrası", value=after.content[:400] or "*boş*", inline=False)
-        embed.set_footer(text=f"Mesaj ID: {before.id}")
+        embed.add_field(name="Before", value=before.content[:400] or "*empty*", inline=False)
+        embed.add_field(name="After", value=after.content[:400] or "*empty*", inline=False)
+        embed.set_footer(text=f"Message ID: {before.id}")
         await self.send_log(before.guild, embed)
 
     @commands.Cog.listener()
@@ -71,12 +63,12 @@ class Logging(commands.Cog):
             removed = [r for r in before.roles if r not in after.roles]
             if not added and not removed:
                 return
-            embed = discord.Embed(title="🎭 Rol Değişikliği", color=discord.Color.purple())
-            embed.add_field(name="Kullanıcı", value=after.mention)
+            embed = discord.Embed(title="🎭 Role Update", color=discord.Color.purple())
+            embed.add_field(name="User", value=after.mention)
             if added:
-                embed.add_field(name="Eklenen", value=", ".join(r.mention for r in added))
+                embed.add_field(name="Roles Added", value=", ".join(r.mention for r in added))
             if removed:
-                embed.add_field(name="Kaldırılan", value=", ".join(r.mention for r in removed))
+                embed.add_field(name="Roles Removed", value=", ".join(r.mention for r in removed))
             await self.send_log(after.guild, embed)
 
 
