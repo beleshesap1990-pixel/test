@@ -8,9 +8,6 @@ from discord import app_commands
 intents = discord.Intents.default()
 intents.message_content = True
 
-# --- RAILWAY DEĞİŞKENİ KONTROLÜ ---
-# Kod, Railway panelindeki YETKILI_ROL_ID değişkenini buradan çeker.
-# Eğer bulamazsa hata vermemesi için varsayılan olarak 0 atar.
 try:
     YETKILI_ROL_ID = int(os.getenv("YETKILI_ROL_ID", 0))
 except ValueError:
@@ -24,7 +21,6 @@ class GeneratorBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         self.hesap_deposu = self.stoklari_yukle()
 
-    # Stokları kalıcı dosyadan okuma fonksiyonu
     def stoklari_yukle(self):
         if os.path.exists(DOSYA_ADI):
             try:
@@ -34,7 +30,6 @@ class GeneratorBot(commands.Bot):
                 return {"steam": [], "netflix": []}
         return {"steam": [], "netflix": []}
 
-    # Stokları kalıcı dosyaya kaydetme fonksiyonu
     def stoklari_kaydet(self):
         try:
             with open(DOSYA_ADI, "w", encoding="utf-8") as f:
@@ -44,7 +39,7 @@ class GeneratorBot(commands.Bot):
 
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"Kalıcı Stok Sistemi ve Yetkili ID ({YETKILI_ROL_ID}) aktif!")
+        print(f"Sistem ve Yetkili ID ({YETKILI_ROL_ID}) aktif!")
 
 bot = GeneratorBot()
 
@@ -53,36 +48,56 @@ async def on_ready():
     print(f"Generator Bot Aktif: {bot.user.name}")
     await bot.change_presence(activity=discord.Game(name="/generate | /stock"))
 
-# ----------------- 1. STOK EKLEME KOMUTU (Sadece Yetkili Rol) -----------------
+# ----------------- 1. TOPLU STOK EKLEME KOMUTU -----------------
 
-@bot.hybrid_command(name="stock", description="Depoya yeni hesap ekler (Kalıcıdır).")
+@bot.hybrid_command(name="stock", description="Depoya tekli veya aralarına '/' koyarak toplu hesap ekler.")
 @app_commands.choices(kategori=[
     app_commands.Choice(name="Steam", value="steam"),
     app_commands.Choice(name="Netflix", value="netflix")
 ])
-async def stock(ctx: commands.Context, kategori: str, hesap: str):
-    # Railway'den gelen ID'ye sahip rolü sunucudan buluyoruz
+async def stock(ctx: commands.Context, kategori: str, hesaplar: str):
     yetkili_rol = ctx.guild.get_role(YETKILI_ROL_ID)
     
-    # Rol kontrolü
     if YETKILI_ROL_ID == 0 or yetkili_rol not in ctx.author.roles:
-        await ctx.send("❌ Bu komutu kullanmak için Railway'de tanımlı yetkili role sahip olmalısınız!", ephemeral=True)
+        await ctx.send("❌ Bu komutu kullanmak için yetkili role sahip olmalısınız!", ephemeral=True)
         return
 
-    if hesap in bot.hesap_deposu[kategori]:
-        await ctx.send("❌ Bu hesap zaten stokta mevcut!", ephemeral=True)
-        return
+    # Gelen metni "/" işaretine göre parçalara ayırıyoruz
+    # strip() ile sağındaki solundaki boşlukları temizliyoruz
+    ham_liste = hesaplar.split("/")
+    eklenen_sayisi = 0
+    mevcut_sayisi = 0
 
-    # Hesabı ekle ve DOSYAYA KAYDET
-    bot.hesap_deposu[kategori].append(hesap)
-    bot.stoklari_kaydet()
-    
+    for h in ham_liste:
+        temiz_hesap = h.strip()
+        if not temiz_hesap:  # Eğer boşluk kaldıysa atla
+            continue
+            
+        # Hesap zaten depoda yoksa ekle
+        if temiz_hesap not in bot.hesap_deposu[kategori]:
+            bot.hesap_deposu[kategori].append(temiz_hesap)
+            eklenen_sayisi += 1
+        else:
+            mevcut_sayisi += 1
+
+    # Eğer en az 1 hesap eklendiyse dosyayı güncelle
+    if eklenen_sayisi > 0:
+        bot.stoklari_kaydet()
+
     kalan_stok = len(bot.hesap_deposu[kategori])
-    await ctx.send(f"📥 Başarıyla `{kategori.upper()}` kategorisine 1 yeni hesap eklendi! Toplam Güncel Stok: **{kalan_stok}**")
+    
+    # Şık bir bilgilendirme mesajı verelim
+    mesaj = f"📥 **Stok İşlemi Tamamlandı!** ({kategori.upper()})\n"
+    mesaj += f"✅ Başarıyla eklenen yeni hesap: **{eklenen_sayisi}**\n"
+    if mevcut_sayisi > 0:
+        mesaj += f"⚠️ Zaten stokta olduğu için atlanan: **{mevcut_sayisi}**\n"
+    mesaj += f"📦 Toplam Güncel Stok: **{kalan_stok}**"
+    
+    await ctx.send(mesaj)
 
-# ----------------- 2. GENERATE KOMUTU (Herkes Kullanabilir) -----------------
+# ----------------- 2. GENERATE KOMUTU -----------------
 
-@bot.hybrid_command(name="generate", description="Depodan rastgele bir hesap üretir, DM atar ve stoktan siler.")
+@bot.hybrid_command(name="generate", description="Depodan rastgele bir hesap üretir, DM atar.")
 @app_commands.choices(kategori=[
     app_commands.Choice(name="Steam", value="steam"),
     app_commands.Choice(name="Netflix", value="netflix")
@@ -104,7 +119,6 @@ async def generate(ctx: commands.Context, kategori: str):
         )
         await ctx.author.send(embed=dm_embed)
         
-        # Stoktan sil ve YENİ HALİNİ DOSYAYA KAYDET
         bot.hesap_deposu[kategori].remove(secilen_hesap)
         bot.stoklari_kaydet()
         
@@ -119,7 +133,13 @@ async def generate(ctx: commands.Context, kategori: str):
         await ctx.send(embed=sunucu_embed)
         
     except discord.Forbidden:
-        await ctx.send(f"❌ {ctx.author.mention}, DM kutunuz kapalı olduğu için hesabı gönderemedim! Ayarlarınızdan DM'leri açıp tekrar deneyin.")
+        await ctx.send(f"❌ {ctx.author.mention}, DM kutunuz kapalı olduğu için hesabı gönderemedim!")
+
+# ----------------- 3. MADE BY KOMUTU -----------------
+
+@bot.hybrid_command(name="madeby", description="botun yapımcısını gösterir")
+async def madeby(ctx: commands.Context):
+    await ctx.send("🛡️made by **real.11**")
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
