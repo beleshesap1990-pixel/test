@@ -1,5 +1,6 @@
 import os
 import random
+import json
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -7,22 +8,43 @@ from discord import app_commands
 intents = discord.Intents.default()
 intents.message_content = True
 
-# --- AYARLAR ---
-# Buraya stok ekleme yetkisi vermek istediğin rolün ID'sini yapıştır:
-YETKILI_ROL_ID = 123456789012345678  # Kendi rol ID'n ile değiştir!
+# --- RAILWAY DEĞİŞKENİ KONTROLÜ ---
+# Kod, Railway panelindeki YETKILI_ROL_ID değişkenini buradan çeker.
+# Eğer bulamazsa hata vermemesi için varsayılan olarak 0 atar.
+try:
+    YETKILI_ROL_ID = int(os.getenv("YETKILI_ROL_ID", 0))
+except ValueError:
+    print("HATA: Railway panelindeki YETKILI_ROL_ID bir sayı olmalıdır!")
+    YETKILI_ROL_ID = 0
+
+DOSYA_ADI = "stoklar.txt"
 
 class GeneratorBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=intents)
-        # Stokları kategorilere göre tutan havuz
-        self.hesap_deposu = {
-            "steam": [],
-            "netflix": []
-        }
+        self.hesap_deposu = self.stoklari_yukle()
+
+    # Stokları kalıcı dosyadan okuma fonksiyonu
+    def stoklari_yukle(self):
+        if os.path.exists(DOSYA_ADI):
+            try:
+                with open(DOSYA_ADI, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {"steam": [], "netflix": []}
+        return {"steam": [], "netflix": []}
+
+    # Stokları kalıcı dosyaya kaydetme fonksiyonu
+    def stoklari_kaydet(self):
+        try:
+            with open(DOSYA_ADI, "w", encoding="utf-8") as f:
+                json.dump(self.hesap_deposu, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Dosya kaydedilirken hata oluştu: {e}")
 
     async def setup_hook(self):
         await self.tree.sync()
-        print("Gelişmiş Stok Sistemi senkronize edildi!")
+        print(f"Kalıcı Stok Sistemi ve Yetkili ID ({YETKILI_ROL_ID}) aktif!")
 
 bot = GeneratorBot()
 
@@ -33,33 +55,34 @@ async def on_ready():
 
 # ----------------- 1. STOK EKLEME KOMUTU (Sadece Yetkili Rol) -----------------
 
-@bot.hybrid_command(name="stock", description="Depoya yeni hesap ekler (Sadece yetkililer).")
+@bot.hybrid_command(name="stock", description="Depoya yeni hesap ekler (Kalıcıdır).")
 @app_commands.choices(kategori=[
     app_commands.Choice(name="Steam", value="steam"),
     app_commands.Choice(name="Netflix", value="netflix")
 ])
 async def stock(ctx: commands.Context, kategori: str, hesap: str):
-    # Komutu yazan kişinin rollerinde bizim belirttiğimiz YETKILI_ROL_ID var mı kontrol ediyoruz
+    # Railway'den gelen ID'ye sahip rolü sunucudan buluyoruz
     yetkili_rol = ctx.guild.get_role(YETKILI_ROL_ID)
     
-    if yetkili_rol not in ctx.author.roles:
-        await ctx.send("❌ Bu komutu kullanmak için gerekli yetkiye sahip değilsiniz!", ephemeral=True)
+    # Rol kontrolü
+    if YETKILI_ROL_ID == 0 or yetkili_rol not in ctx.author.roles:
+        await ctx.send("❌ Bu komutu kullanmak için Railway'de tanımlı yetkili role sahip olmalısınız!", ephemeral=True)
         return
 
-    # Hesap zaten depoda varsa mükerrer eklemeyi önle
     if hesap in bot.hesap_deposu[kategori]:
         await ctx.send("❌ Bu hesap zaten stokta mevcut!", ephemeral=True)
         return
 
-    # Hesabı ilgili kategoriye ekle
+    # Hesabı ekle ve DOSYAYA KAYDET
     bot.hesap_deposu[kategori].append(hesap)
-    kalan_stok = len(bot.hesap_deposu[kategori])
+    bot.stoklari_kaydet()
     
-    await ctx.send(f"📥 Başarıyla `{kategori.upper()}` kategorisine 1 yeni hesap eklendi! Toplam Stok: **{kalan_stok}**")
+    kalan_stok = len(bot.hesap_deposu[kategori])
+    await ctx.send(f"📥 Başarıyla `{kategori.upper()}` kategorisine 1 yeni hesap eklendi! Toplam Güncel Stok: **{kalan_stok}**")
 
 # ----------------- 2. GENERATE KOMUTU (Herkes Kullanabilir) -----------------
 
-@bot.hybrid_command(name="generate", description="Depodan rastgele bir hesap üretir ve DM ile gönderir.")
+@bot.hybrid_command(name="generate", description="Depodan rastgele bir hesap üretir, DM atar ve stoktan siler.")
 @app_commands.choices(kategori=[
     app_commands.Choice(name="Steam", value="steam"),
     app_commands.Choice(name="Netflix", value="netflix")
@@ -67,16 +90,13 @@ async def stock(ctx: commands.Context, kategori: str, hesap: str):
 async def generate(ctx: commands.Context, kategori: str):
     await ctx.defer()
     
-    # Stok kontrolü
     if kategori not in bot.hesap_deposu or len(bot.hesap_deposu[kategori]) == 0:
         await ctx.send(f"❌ Maalesef, `{kategori.upper()}` kategorisinde şu an hiç stok kalmadı!")
         return
         
-    # Rastgele hesap seçimi
     secilen_hesap = random.choice(bot.hesap_deposu[kategori])
     
     try:
-        # DM Gönderimi
         dm_embed = discord.Embed(
             title="🎁 Hesabınız Başarıyla Üretildi!",
             description=f"İşte talep ettiğiniz `{kategori.upper()}` hesap bilgileri:\n\n`{secilen_hesap}`",
@@ -84,10 +104,10 @@ async def generate(ctx: commands.Context, kategori: str):
         )
         await ctx.author.send(embed=dm_embed)
         
-        # Stoktan silme (görünmez kılma)
+        # Stoktan sil ve YENİ HALİNİ DOSYAYA KAYDET
         bot.hesap_deposu[kategori].remove(secilen_hesap)
+        bot.stoklari_kaydet()
         
-        # Sunucuya duyuru mesajı (İsteğin üzerine "real" kelimesini kaldırdım)
         sunucu_embed = discord.Embed(
             title="🎉 BAŞARILI GENERATE!",
             description=f"{ctx.author.mention} az önce başarıyla bir **{kategori.upper()}** hesabı generateledi! 🚀",
