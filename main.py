@@ -11,7 +11,7 @@ intents.message_content = True
 try:
     YETKILI_ROL_ID = int(os.getenv("YETKILI_ROL_ID", 0))
 except ValueError:
-    print("HATA: Railway panelindeki YETKILI_ROL_ID bir sayı olmalıdır!")
+    print("ERROR: YETKILI_ROL_ID in the Railway panel must be a valid number!")
     YETKILI_ROL_ID = 0
 
 DOSYA_ADI = "stoklar.txt"
@@ -28,92 +28,90 @@ class GeneratorBot(commands.Bot):
                     return json.load(f)
             except Exception:
                 pass
-        return {} # Başlangıçta tamamen boş veri tabanı
+        return {} # Dynamic database starts empty
 
     def stoklari_kaydet(self):
         try:
             with open(DOSYA_ADI, "w", encoding="utf-8") as f:
                 json.dump(self.hesap_deposu, f, ensure_ascii=False, indent=4)
         except Exception as e:
-            print(f"Dosya kaydedilirken hata oluştu: {e}")
+            print(f"Error saving file: {e}")
 
     async def setup_hook(self):
         await self.tree.sync()
-        print(f"Sistem aktif! Yetkili ID: {YETKILI_ROL_ID}")
+        print(f"System active! Authorized Role ID: {YETKILI_ROL_ID}")
 
 bot = GeneratorBot()
 
 @bot.event
 async def on_ready():
-    print(f"Generator Bot Aktif: {bot.user.name}")
+    print(f"Generator Bot is Online: {bot.user.name}")
     await bot.change_presence(activity=discord.Game(name="/stock | /generate"))
 
-# ----------------- 1. STOK EKLEME KOMUTU -----------------
+# ----------------- 1. ADD STOCK COMMAND -----------------
 
-@bot.hybrid_command(name="stock-ekle", description="Depoya tekli veya aralarına '/' koyarak toplu hesap ekler.")
-async def stock_ekle(ctx: commands.Context, kategori: str, hesaplar: str):
-    yetkili_rol = ctx.guild.get_role(YETKILI_ROL_ID)
-    kategori = kategori.lower().strip()
+@bot.hybrid_command(name="add-stock", description="Add accounts to the stock (Single or bulk using '/' separator).")
+async def add_stock(ctx: commands.Context, category: str, accounts: str):
+    authorized_role = ctx.guild.get_role(YETKILI_ROL_ID)
+    category = category.lower().strip()
     
-    if YETKILI_ROL_ID == 0 or yetkili_rol not in ctx.author.roles:
-        await ctx.send("❌ Bu komutu kullanmak için yetkili role sahip olmalısınız!", ephemeral=True)
+    if YETKILI_ROL_ID == 0 or authorized_role not in ctx.author.roles:
+        await ctx.send("❌ You must have the authorized role to use this command!", ephemeral=True)
         return
 
-    # Eğer kategori veritabanında yoksa dinamik olarak oluşturulur
-    if kategori not in bot.hesap_deposu:
-        bot.hesap_deposu[kategori] = []
+    # Create category dynamically if it doesn't exist
+    if category not in bot.hesap_deposu:
+        bot.hesap_deposu[category] = []
 
-    ham_liste = hesaplar.split("/")
-    eklenen_sayisi = 0
+    raw_list = accounts.split("/")
+    added_count = 0
 
-    for h in ham_liste:
-        temiz_hesap = h.strip()
-        if not temiz_hesap:
+    for acc in raw_list:
+        clean_acc = acc.strip()
+        if not clean_acc:
             continue
-        if temiz_hesap not in bot.hesap_deposu[kategori]:
-            bot.hesap_deposu[kategori].append(temiz_hesap)
-            eklenen_sayisi += 1
+        if clean_acc not in bot.hesap_deposu[category]:
+            bot.hesap_deposu[category].append(clean_acc)
+            added_count += 1
 
-    if eklenen_sayisi > 0:
+    if added_count > 0:
         bot.stoklari_kaydet()
 
-    await ctx.send(f"✅ `{kategori.upper()}` kategorisine **{eklenen_sayisi}** adet yeni hesap başarıyla eklendi!")
+    await ctx.send(f"✅ Successfully added **{added_count}** new account(s) to `{category.upper()}` category!")
 
-# ----------------- 2. KONTROL ETME PANELİ (Sadece Mevcut Stoklar) -----------------
+# ----------------- 2. CHECK STOCK STATUS PANEL -----------------
 
-@bot.hybrid_command(name="stock", description="Mevcut kategorilerin güncel stok durumunu listeler.")
+@bot.hybrid_command(name="stock", description="List the current status of active stock categories.")
 async def stock(ctx: commands.Context):
     embed = discord.Embed(
         title="📦 Normal Stock Status",
         color=discord.Color.green()
     )
     
-    stok_metni = ""
-    aktif_kategori_sayisi = 0
+    stock_text = ""
+    active_categories = 0
 
-    # Sadece içinde en az 1 hesap olan veya geçmişte eklenmiş kategorileri kontrol et
-    for kat, hesaplar in bot.hesap_deposu.items():
-        stok_sayisi = len(hesaplar)
+    for cat, accounts_list in bot.hesap_deposu.items():
+        stock_count = len(accounts_list)
         
-        # EĞER STOK 0 İSE LİSTEDE GÖSTERME, PAS GEÇ
-        if stok_sayisi == 0:
+        # IF STOCK IS 0, HIDE IT FROM THE LIST
+        if stock_count == 0:
             continue
             
-        aktif_kategori_sayisi += 1
+        active_categories += 1
         
-        # Dinamik Emoji Ayarı
-        if stok_sayisi <= 10:
-            emoji = "🟡"  # Azalıyor
+        # Dynamic Emoji Indicator
+        if stock_count <= 10:
+            emoji = "🟡"  # Low stock
         else:
-            emoji = "🟢"  # Bolca var
+            emoji = "🟢"  # Plenty of stock
 
-        stok_metni += f"{emoji} **{kat.capitalize()}**: {stok_sayisi}\n"
+        stock_text += f"{emoji} **{cat.capitalize()}**: {stock_count}\n"
 
-    # Eğer hiçbir kategoride hiç stok yoksa kullanıcıyı bilgilendir
-    if aktif_kategori_sayisi == 0:
-        embed.description = "❌ Şu anda sunucuda aktif hiçbir stok bulunmamaktadır."
+    if active_categories == 0:
+        embed.description = "❌ There is currently no active stock available in the database."
     else:
-        embed.description = stok_metni
+        embed.description = stock_text
 
     embed.add_field(
         name="📊 Legend", 
@@ -124,45 +122,45 @@ async def stock(ctx: commands.Context):
     
     await ctx.send(embed=embed)
 
-# ----------------- 3. GENERATE KOMUTU -----------------
+# ----------------- 3. GENERATE ACCOUNT COMMAND -----------------
 
-@bot.hybrid_command(name="generate", description="Depodan rastgele bir hesap üretir, DM atar.")
-async def generate(ctx: commands.Context, kategori: str):
+@bot.hybrid_command(name="generate", description="Generate a random account from the stock and receive it via DM.")
+async def generate(ctx: commands.Context, category: str):
     await ctx.defer()
-    kategori = kategori.lower().strip()
+    category = category.lower().strip()
     
-    if kategori not in bot.hesap_deposu or len(bot.hesap_deposu[kategori]) == 0:
-        await ctx.send(f"❌ Maalesef, `{kategori.upper()}` kategorisinde şu an hiç stok kalmadı!")
+    if category not in bot.hesap_deposu or len(bot.hesap_deposu[category]) == 0:
+        await ctx.send(f"❌ Sorry, the `{category.upper()}` category is currently out of stock!")
         return
         
-    secilen_hesap = random.choice(bot.hesap_deposu[kategori])
+    selected_account = random.choice(bot.hesap_deposu[category])
     
     try:
         dm_embed = discord.Embed(
-            title="🎁 Hesabınız Başarıyla Üretildi!",
-            description=f"İşte talep ettiğiniz `{kategori.upper()}` hesap bilgileri:\n\n`{secilen_hesap}`",
+            title="🎁 Your Account Has Been Generated!",
+            description=f"Here is your requested `{category.upper()}` account details:\n\n`{selected_account}`",
             color=discord.Color.green()
         )
         await ctx.author.send(embed=dm_embed)
         
-        bot.hesap_deposu[kategori].remove(secilen_hesap)
+        bot.hesap_deposu[category].remove(selected_account)
         bot.stoklari_kaydet()
         
-        sunu_embed = discord.Embed(
-            title="🎉 BAŞARILI GENERATE!",
-            description=f"{ctx.author.mention} az önce başarıyla bir **{kategori.upper()}** hesabı generateledi! 🚀",
+        server_embed = discord.Embed(
+            title="🎉 GENERATE SUCCESSFUL!",
+            description=f"{ctx.author.mention} just successfully generated a **{category.upper()}** account! 🚀",
             color=discord.Color.blue()
         )
-        await ctx.send(embed=sunu_embed)
+        await ctx.send(embed=server_embed)
         
     except discord.Forbidden:
-        await ctx.send(f"❌ {ctx.author.mention}, DM kutunuz kapalı olduğu için hesabı gönderemedim!")
+        await ctx.send(f"❌ {ctx.author.mention}, I couldn't send the account because your DMs are closed!")
 
-# ----------------- 4. MADE BY KOMUTU -----------------
+# ----------------- 4. MADE BY COMMAND -----------------
 
-@bot.hybrid_command(name="madeby", description="Botun yapımcısını gösterir.")
+@bot.hybrid_command(name="madeby", description="Show the creator of the bot.")
 async def madeby(ctx: commands.Context):
-    await ctx.send("🛡️made by **real.11**")
+    await ctx.send("🛡️ This bot was made by **real.11**")
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -170,4 +168,4 @@ if __name__ == "__main__":
     if TOKEN:
         bot.run(TOKEN)
     else:
-        print("HATA: 'DISCORD_TOKEN' bulunamadı.")
+        print("ERROR: 'DISCORD_TOKEN' environment variable not found.")
